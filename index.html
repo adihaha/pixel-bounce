@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
-<title>找到第一个球 · Pixel Breakout v3</title>
+<title>找到第一个球 · Pixel Breakout v4</title>
 <style>
   :root{
     --bg:#0f0e17; --panel:#1a1930; --ink:#fffffe; --dim:#a7a9be;
@@ -101,7 +101,7 @@
     <button class="mute" id="muteBtn" title="声音">🔊</button>
     <div class="overlay" id="startOverlay">
       <h1><span class="px">找</span>到第一个球</h1>
-      <p>抖音爆火解压打砖块 · 像素复刻版<br>砖块数字 = 血量，归零才碎<br>按住蓄力 → 松手齐射 · 接道具分裂倍增</p>
+      <p>抖音爆火解压打砖块 · 像素复刻版 v4<br>15 个预设关卡 · 灰墙挡路，找缺口攻入<br>砖块数字 = 血量，归零才碎 · 按住蓄力 → 松手齐射</p>
       <p class="tip">👆 按住蓄力瞄准 · 松手齐射 ｜ 松开后拖拽挡板 ｜ ◀ ▶ 键盘 / 空格齐射</p>
       <button class="btn" id="startBtn">开始 ▶</button>
     </div>
@@ -111,7 +111,7 @@
       <button class="btn" id="againBtn">再来一局</button>
     </div>
     <div class="overlay hidden" id="settleOverlay">
-      <h1 style="color:var(--green)">LEVEL CLEAR!</h1>
+      <h1 id="settleTitle" style="color:var(--green)">LEVEL CLEAR!</h1>
       <div id="settleStars">★★★</div>
       <p>得分 <b id="settleScore" style="color:var(--accent);font-size:24px">0</b></p>
       <button class="btn pulse" id="nextBtn">下一关 ▶</button>
@@ -183,16 +183,136 @@
   }
 
   // ---- 常量 ----
-  const COLS = 8;
-  const BRICK_W = (W-40)/COLS, BRICK_H = 13, BRICK_TOP = 34, BRICK_GAP = 4;
+  const BRICK_H = 13, BRICK_TOP = 40;              // v4 砖高固定，砖宽随列数动态计算
   const BRICK_COLORS = ['#ff8906','#ffb703','#7f5af0','#2cb67d','#e53170','#00d4ff'];
   const DROP_RATE = 0.22;      // 砖块掉落道具概率
   const BALL_MAX = 24;         // 小球上限（防卡顿）
-  const QUEUE_MAX = 6;         // v3-2 待发球上限
+  const QUEUE_MAX = 8;         // v4 待发球上限（后期关卡 6 球起步）
   const FIRE_SPREAD = 0.35;    // v3-2 齐射扇面弧度
 
+  // ================= v4 关卡表：15 个预设关卡（替代 v3 无尽随机） =================
+  // 字段：rows 行数 | cols 列数 | pattern 砖块布局 | wallPattern 围墙模式
+  //       hpMin/hpMax 砖块血量范围 | speedMult 球速倍率 | queue 待发球数 | note 设计意图
+  // 围墙模式：0 无墙 / 1 两侧柱 / 2 中间柱 / 3 阶梯墙 / 4 U形墙 / 5 迷宫墙 / 6 L形墙 / 7 双柱横梁
+  // 难度曲线：前 3 关简单教学 → 4-8 关中量 → 9-15 高难（厚血 + 密墙），15 关通关后循环（球速封顶）
+  const LEVELS = [
+    {rows:5,  cols:8,  pattern:'full',    wallPattern:0, hpMin:1, hpMax:1, speedMult:1.00, queue:3, note:'教学关：整墙满铺，一碰就碎'},
+    {rows:6,  cols:8,  pattern:'full',    wallPattern:0, hpMin:1, hpMax:1, speedMult:1.05, queue:3, note:'加行提速，熟悉手感'},
+    {rows:6,  cols:9,  pattern:'full',    wallPattern:1, hpMin:1, hpMax:2, speedMult:1.10, queue:3, note:'首次见墙：两侧立柱'},
+    {rows:7,  cols:9,  pattern:'checker', wallPattern:0, hpMin:1, hpMax:2, speedMult:1.15, queue:3, note:'棋盘格，隔行敲击'},
+    {rows:7,  cols:10, pattern:'full',    wallPattern:2, hpMin:1, hpMax:2, speedMult:1.20, queue:4, note:'中间柱：绕柱击砖'},
+    {rows:8,  cols:10, pattern:'stepsL',  wallPattern:1, hpMin:2, hpMax:2, speedMult:1.25, queue:4, note:'阶梯砖 + 两侧墙'},
+    {rows:8,  cols:11, pattern:'frame',   wallPattern:3, hpMin:2, hpMax:2, speedMult:1.30, queue:4, note:'阶梯墙分割战场'},
+    {rows:9,  cols:11, pattern:'wedge',   wallPattern:4, hpMin:2, hpMax:2, speedMult:1.35, queue:4, note:'U形墙围砖，缺口攻入'},
+    {rows:9,  cols:12, pattern:'full',    wallPattern:5, hpMin:2, hpMax:3, speedMult:1.40, queue:5, note:'迷宫墙，绕路击砖'},
+    {rows:10, cols:12, pattern:'checker', wallPattern:7, hpMin:2, hpMax:3, speedMult:1.45, queue:5, note:'双柱横梁，上下夹击'},
+    {rows:10, cols:12, pattern:'center',  wallPattern:6, hpMin:3, hpMax:3, speedMult:1.50, queue:5, note:'L形墙困住中央厚血砖'},
+    {rows:10, cols:12, pattern:'full',    wallPattern:5, hpMin:3, hpMax:3, speedMult:1.55, queue:5, note:'迷宫 + 全厚血'},
+    {rows:10, cols:12, pattern:'wedge',   wallPattern:4, hpMin:3, hpMax:4, speedMult:1.60, queue:6, note:'U形墙 + 厚血拆墙战'},
+    {rows:10, cols:12, pattern:'stepsR',  wallPattern:2, hpMin:3, hpMax:4, speedMult:1.65, queue:6, note:'中间柱 + 4血砖'},
+    {rows:10, cols:12, pattern:'full',    wallPattern:5, hpMin:3, hpMax:4, speedMult:1.70, queue:6, note:'最终关：迷宫 + 厚血 + 满铺'},
+  ];
+  const WALL_CAP = 1.7;        // v4 循环模式难度封顶：球速不超过最终关
+
+  // 砖块布局模式：返回 (r,c) 处是否有砖
+  function brickCell(p, r, c, rows, cols){
+    switch(p){
+      case 'checker': return (r+c)%2===0;                                  // 棋盘格
+      case 'frame':   return r===0||r===rows-1||c===0||c===cols-1;         // 边框
+      case 'stepsL':  return c>=r;                                         // 左下阶梯
+      case 'stepsR':  return c<=cols-1-r;                                  // 右下阶梯
+      case 'wedge':   return c>=Math.floor(cols*r/rows);                   // 楔形
+      case 'center':  return c>=Math.floor(cols/4)&&c<cols-Math.floor(cols/4)&&r>=Math.floor(rows/4)&&r<rows-Math.floor(rows/4); // 中央方块
+      default:        return true;                                         // full 满铺
+    }
+  }
+
+  // v4 围墙布局：返回 {cells:墙格子[], gaps:缺口格子[]}（格子用 {r,c} 行列表示）
+  // 缺口格子 = 无砖无墙的通道，球必须从缺口进出被围住的区域
+  function wallCells(mode, rows, cols){
+    const cells=[], gaps=[];
+    const add=(r,c)=>{ if(r>=0&&r<rows&&c>=0&&c<cols) cells.push({r,c}); };
+    const gap=(r,c)=>{ if(r>=0&&r<rows&&c>=0&&c<cols) gaps.push({r,c}); };
+    switch(mode){
+      case 0: break;                                   // 0 无墙
+      case 1:                                          // 1 两侧立柱：左右各一列短墙
+        for(let r=1;r<=rows-3;r++){ add(r,0); add(r,cols-1); }
+        break;
+      case 2: {                                        // 2 中间柱：中央垂直柱，底部留缺口
+        const mid=Math.floor(cols/2);
+        for(let r=0;r<=rows-2;r++) add(r,mid);
+        gap(rows-1,mid); gap(rows-1,mid-1); gap(rows-1,mid+1);
+        break; }
+      case 3: {                                        // 3 阶梯墙：斜向阶梯，两端留空 + 中部缺口（防密封死区）
+        for(let c=0;c<cols;c++){ const r=rows-2-Math.floor(c/2); if(r>=1) add(r,c); }
+        gap(0,0); gap(rows-1,cols-1);
+        const mc=Math.floor(cols/2);                   // 中部缺口：让球能穿越对角线两侧
+        gap(rows-2-Math.floor(mc/2), mc);
+        break; }
+      case 4: {                                        // 4 U形墙：两侧竖墙 + 顶部横梁，开口朝下
+        for(let r=0;r<=rows-2;r++){ add(r,1); add(r,cols-2); }
+        for(let c=1;c<=cols-2;c++) add(0,c);
+        for(let c=1;c<=cols-2;c++) gap(rows-1,c);
+        break; }
+      case 5: {                                        // 5 迷宫墙：上横/中竖/下横三段交错，各留缺口
+        for(let c=0;c<cols;c++){ if(c<2||c>3) add(2,c); }
+        for(let r=3;r<=6;r++){ if(r!==4) add(r,5); }
+        for(let c=0;c<cols;c++){ if(c<9||c>10) add(6,c); }
+        gap(2,2); gap(2,3); gap(4,5); gap(6,9); gap(6,10);
+        break; }
+      case 6: {                                        // 6 L形墙：左竖 + 下横，右下角留缺口
+        for(let r=0;r<=rows-2;r++) add(r,0);
+        for(let c=0;c<=cols-3;c++) add(rows-2,c);
+        gap(rows-1,cols-2); gap(rows-1,cols-1); gap(rows-2,cols-2); gap(rows-2,cols-1);
+        break; }
+      case 7: {                                        // 7 双柱+横梁：两立柱顶横梁，柱间底部开口
+        for(let r=1;r<=rows-2;r++){ add(r,2); add(r,cols-3); }
+        for(let c=2;c<=cols-3;c++) add(1,c);
+        for(let c=2;c<=cols-3;c++) gap(rows-1,c);
+        break; }
+    }
+    return {cells, gaps};
+  }
+
+  // 将墙格子合并为实心矩形（先水平合并，再垂直合并同宽相邻段，间隙填实防漏球）
+  function wallRects(cells, rows, cols){
+    const map={};
+    for(const c of cells) map[c.r*cols+c.c]=true;
+    const rects=[];
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;){
+        if(!map[r*cols+c]){ c++; continue; }
+        let c2=c;
+        while(c2+1<cols && map[r*cols+(c2+1)]) c2++;
+        rects.push({x:curLeft+c*(curBW+curGap), y:BRICK_TOP+r*(BRICK_H+curGap), w:(c2-c+1)*curBW+(c2-c)*curGap, h:BRICK_H});
+        c=c2+1;
+      }
+    }
+    const out=[];
+    for(const rt of rects){
+      let merged=false;
+      for(const o of out){
+        if(o.x===rt.x && o.w===rt.w && rt.y===o.y+o.h+curGap){  // 垂直相邻 → 合并成实心
+          o.h=rt.y+rt.h-o.y; merged=true; break;
+        }
+      }
+      if(!merged) out.push({x:rt.x,y:rt.y,w:rt.w,h:rt.h});
+    }
+    return out;
+  }
+
+  // v4 当前关卡定义：15 关后按 (level-1)%15 循环，循环时球速封顶（难度不再上升）
+  function loopOf(){ return Math.floor((level-1)/LEVELS.length); }
+  function levelDef(){
+    const def = LEVELS[(level-1)%LEVELS.length];
+    if(loopOf()>0) return Object.assign({}, def, {speedMult: WALL_CAP});
+    return def;
+  }
+
   // ---- 状态 ----
-  let bricks=[], balls=[], drops=[], score=0, lives=3, level=1;
+  let bricks=[], walls=[], balls=[], drops=[], score=0, lives=3, level=1;
+  // v4 当前关卡网格参数（随关卡表动态计算）
+  let curCols=8, curRows=5, curBW=29, curGap=3, curLeft=13;
   let paddle, running=false;
   let lastT=0, animId=null;
   let comboFlash=0, comboText='', comboColor='#fff';
@@ -211,30 +331,43 @@
   let destroyedLog=[], lastTriple=0, saveCd=0;         // v3-10 命名奖励
   let lastSplitT=0, cascade=1;                         // v3-7 分裂雪崩
 
-  function brickPoints(row){ return (10+level)*(ROWS_LV-row)*2; }
-  let ROWS_LV = 5;
+  function brickPoints(row){ return (10+((level-1)%LEVELS.length)+1)*(curRows-row)*2; }
 
   // v3-1 砖块血量：随关卡递增，前 2 行低血（v3-12 开局速爽）
+  // v4 按关卡表生成砖块 + 围墙：算网格 → 铺砖 → 叠墙（墙覆盖砖）→ 留缺口通道
   function buildLevel(){
-    ROWS_LV = Math.min(3 + Math.floor(level/2), 8);   // 关卡越高行越多（无尽）
-    bricks = [];
-    for(let r=0;r<ROWS_LV;r++){
-      let hp;
-      if(r<1) hp = 1;                                   // 首行必碎
-      else if(r<2) hp = 1 + (Math.random()<0.6?1:0);    // 第二行 1-2
-      else hp = Math.min(3, 1+Math.floor(level/2)) + (Math.random()<0.35?1:0); // 随关卡 1-3
-      hp = Math.min(3, Math.max(1, hp));
-      for(let c=0;c<COLS;c++){
-        bricks.push({x:20+c*(BRICK_W+BRICK_GAP), y:BRICK_TOP+r*(BRICK_H+BRICK_GAP), w:BRICK_W, h:BRICK_H, alive:true, row:r, hp});
+    const def = levelDef();
+    curCols = def.cols; curRows = def.rows;
+    curGap  = curCols>=11 ? 2 : 3;                     // 密砖时缩小砖缝，砖更小更密
+    curBW   = Math.floor((W-24-(curCols-1)*curGap)/curCols);
+    curLeft = Math.floor((W-(curCols*curBW+(curCols-1)*curGap))/2);
+    const {cells:wCells, gaps:gCells} = wallCells(def.wallPattern, curRows, curCols);
+    const blocked={};
+    for(const g of gCells) blocked[g.r*curCols+g.c]=true;  // 缺口：无砖无墙，球从此进出
+    const wSet={};
+    for(const w of wCells) wSet[w.r*curCols+w.c]=true;
+    for(const k in blocked) delete wSet[k];                // v4.1 缺口格必须同时从墙中剔除，否则通道被墙堵死
+    const wCellsF = wCells.filter(w=>!blocked[w.r*curCols+w.c]);
+    bricks=[];
+    for(let r=0;r<curRows;r++){
+      for(let c=0;c<curCols;c++){
+        const k=r*curCols+c;
+        if(wSet[k]||blocked[k]||!brickCell(def.pattern,r,c,curRows,curCols)) continue;
+        let hp;
+        if(r===0) hp=1;                                // v3-12 首行必碎（开局速爽）
+        else hp=Math.min(4, def.hpMin+((Math.random()*(def.hpMax-def.hpMin+1))|0)); // v4 血量随关卡表
+        bricks.push({x:curLeft+c*(curBW+curGap), y:BRICK_TOP+r*(BRICK_H+curGap), w:curBW, h:BRICK_H, alive:true, row:r, hp});
       }
     }
+    walls = wallRects(wCellsF, curRows, curCols);     // v4 围墙（不可破坏障碍物）
   }
 
   function newBall(x,y,vx,vy,r){
     return {x,y,vx,vy,r, trail:[], flash:0};
   }
   function resetBalls(){
-    balls = [newBall(W/2, H-58, (Math.random()<.5?-1:1)*(1.8+level*.12), -(3.1+level*.1), 4)];
+    const sp = levelDef().speedMult;                   // v4 球速随关卡表倍率递增
+    balls = [newBall(W/2, H-58, (Math.random()<.5?-1:1)*(1.8*sp), -(3.1*sp), 4)];
   }
   function resetPaddle(){
     paddle = { x:(W-56)/2, y:H-22, w:56, h:7 };
@@ -263,7 +396,7 @@
   function startGame(){
     score=0; lives=3; level=1;
     buildLevel(); resetPaddle(); resetBalls(); drops=[];
-    queue=3; phase='play'; timeScale=1; aimAngle=0;
+    queue=LEVELS[0].queue; phase='play'; timeScale=1; aimAngle=0;
     combo=0; comboT=0; megaShown=false; destroyedLog=[]; lastTriple=0; saveCd=0;
     particles=[]; floats=[]; rings=[]; chainQueue=[];
     flash=0; shakeState.t=0; lastSplitT=0; cascade=1;
@@ -278,7 +411,8 @@
 
   function updateHud(){
     document.getElementById('score').textContent = score;
-    document.getElementById('level').textContent = level;
+    const loopN = loopOf();
+    document.getElementById('level').textContent = ((level-1)%LEVELS.length+1) + (loopN>0 ? '↻'+loopN : '');
     document.getElementById('ballCnt').textContent = balls.length;
     document.getElementById('queueCnt').textContent = queue;
     document.getElementById('lives').textContent = '♥'.repeat(Math.max(0,lives)) + '♡'.repeat(Math.max(0,3-lives));
@@ -335,7 +469,7 @@
     const room = BALL_MAX - balls.length;
     if(room<=0) return;
     const n = Math.min(queue, room);
-    const sp = 3.2 + level*0.12;
+    const sp = 3.2*levelDef().speedMult;
     const px = paddle.x+paddle.w/2, py = paddle.y;
     for(let i=0;i<n;i++){
       const t = n===1 ? 0 : (i/(n-1)-0.5);
@@ -448,6 +582,19 @@
     updateHud();
   }
 
+  // v4 矩形反弹（砖块/围墙共用）：从较深一侧推出，防止重复判定
+  function bounceOffRect(b, r){
+    const cx=r.x+r.w/2, cy=r.y+r.h/2;
+    const dx=b.x-cx, dy=b.y-cy;
+    if(Math.abs(dx/r.w) > Math.abs(dy/r.h)){
+      b.vx = dx>0? Math.abs(b.vx):-Math.abs(b.vx);
+      b.x = dx>0 ? r.x+r.w+b.r : r.x-b.r;
+    }else{
+      b.vy = dy>0? Math.abs(b.vy):-Math.abs(b.vy);
+      b.y = dy>0 ? r.y+r.h+b.r : r.y-b.r;
+    }
+  }
+
   // ---- 球体更新（sf=速度系数，慢动作时缩小） ----
   function updateBalls(sf){
     for(const b of balls){
@@ -492,6 +639,14 @@
           break;
         }
       }
+      // v4 围墙碰撞：同砖块反弹逻辑，但不可破坏、无粒子/分数/道具
+      for(const wl of walls){
+        if(b.x+b.r>wl.x && b.x-b.r<wl.x+wl.w && b.y+b.r>wl.y && b.y-b.r<wl.y+wl.h){
+          bounceOffRect(b, wl);
+          S.wall();
+          break;
+        }
+      }
     }
   }
 
@@ -510,8 +665,13 @@
   // ---- v3-13 结算高潮页 ----
   function showSettle(){
     phase='settle';
-    // 星级：剩余球数 + 生命
-    const st = 1 + (balls.length+queue>=6?1:0) + (lives>=2?1:0);
+    // v4 第 15 关通关 → 「全部通关！」终局结算，之后按钮进入循环模式
+    const isFinal = (level-1)%LEVELS.length === LEVELS.length-1;
+    // 星级：剩余球数 + 生命（终局满星）
+    const st = isFinal ? 3 : 1 + (balls.length+queue>=6?1:0) + (lives>=2?1:0);
+    document.getElementById('settleTitle').textContent = isFinal ? '🏆 全部通关！' : 'LEVEL CLEAR!';
+    document.getElementById('settleTitle').style.color = isFinal ? 'var(--accent)' : 'var(--green)';
+    document.getElementById('nextBtn').textContent = isFinal ? '循环模式 ▶' : '下一关 ▶';
     document.getElementById('settleStars').textContent = '★'.repeat(st)+'☆'.repeat(3-st);
     document.getElementById('settleScore').textContent = score;
     settleRoll = {from:0, to:score, t:0, dur:1.1};
@@ -609,7 +769,7 @@
           if(lives<=0){
             running=false; charging=false;
             document.getElementById('overScore').textContent = score;
-            document.getElementById('overLevel').textContent = level;
+            document.getElementById('overLevel').textContent = (level-1)%LEVELS.length+1;
             show('overOverlay');
             return;
           }else{
@@ -660,15 +820,28 @@
     return `rgb(${r},${g},${b})`;
   }
   function drawBrick(b){
-    const bright = b.hp===3 ? 1 : b.hp===2 ? 0.72 : 0.5;
+    const bright = b.hp>=3 ? 1 : b.hp===2 ? 0.72 : 0.5;   // v4 hp 最高 4
     ctx.fillStyle = shade(BRICK_COLORS[b.row % BRICK_COLORS.length], bright);
     ctx.fillRect(b.x+1, b.y+1, b.w-2, b.h-2);
     ctx.fillStyle = 'rgba(255,255,255,.25)';
     ctx.fillRect(b.x+1, b.y+1, b.w-2, 3);
     ctx.fillStyle = 'rgba(0,0,0,.35)';
     ctx.fillRect(b.x+1, b.y+b.h-3, b.w-2, 2);
-    // 血量数字
-    pxText(b.hp, b.x+b.w/2, b.y+b.h/2+0.5, 8, '#ffffff');
+    // 血量数字（v4 密砖下字号随砖宽自适应）
+    pxText(b.hp, b.x+b.w/2, b.y+b.h/2+0.5, Math.max(6, Math.min(9, b.w-6)), '#ffffff');
+  }
+  // v4 围墙绘制：钢铁质感（深灰底 + 亮高光边 + 铆钉点），与彩色砖块明显区分
+  function drawWall(w){
+    ctx.fillStyle = '#4a4a5a';
+    ctx.fillRect(w.x, w.y, w.w, w.h);
+    ctx.fillStyle = '#8a8aa0';
+    ctx.fillRect(w.x, w.y, w.w, 2);
+    ctx.fillRect(w.x, w.y, 2, w.h);
+    ctx.fillStyle = '#23232f';
+    ctx.fillRect(w.x, w.y+w.h-2, w.w, 2);
+    ctx.fillRect(w.x+w.w-2, w.y, 2, w.h);
+    ctx.fillStyle = 'rgba(255,255,255,.22)';
+    ctx.fillRect(w.x+w.w/2-1, w.y+w.h/2-1, 2, 2);
   }
   function draw(){
     ctx.clearRect(0,0,W,H);
@@ -687,6 +860,8 @@
     }
     // 砖块
     for(const b of bricks) if(b.alive) drawBrick(b);
+    // v4 围墙（绘制在砖块上层）
+    for(const w of walls) drawWall(w);
     // 道具
     for(const d of drops){
       d.t+=0.1;
@@ -802,6 +977,28 @@
   $('againBtn').onclick = () => { hide('winOverlay'); startGame(); };
   $('retryBtn').onclick = () => { hide('overOverlay'); startGame(); };
   $('nextBtn').onclick = () => { nextLevel(); };
+
+  // ---- v4 调试接口（供自动化验证 / 截图使用）----
+  window.__pb = {
+    start: startGame,
+    setLevel(n){ level=Math.max(1,Math.min(LEVELS.length,n|0)); buildLevel(); resetPaddle(); resetBalls(); drops=[]; queue=levelDef().queue; phase='play'; timeScale=1; charging=false; hide('startOverlay'); hide('settleOverlay'); hide('overOverlay'); hide('winOverlay'); updateHud(); },
+    defs: LEVELS,
+    get level(){ return level; },
+    get bricks(){ return bricks.length; },
+    get walls(){ return walls.length; },
+    get grid(){ return {cols:curCols, rows:curRows, left:curLeft, bw:curBW, gap:curGap, top:BRICK_TOP, bh:BRICK_H}; },
+    get bricksAll(){ return bricks; },
+    get wallsAll(){ return walls; },
+    fire: fireQueue
+  };
+
+  // v4 自动化支持：URL ?level=5&mute=1 直接进入指定关卡并静音（headless 截图验证用）
+  (() => {
+    const qs = new URLSearchParams(location.search);
+    if(qs.get('mute')==='1'){ muted=true; muteBtn.textContent='🔇'; }
+    const n = parseInt(qs.get('level')||'0',10);
+    if(n>0){ hide('startOverlay'); startGame(); window.__pb.setLevel(n); }
+  })();
 
   // 首帧预览
   buildLevel(); resetPaddle(); resetBalls();

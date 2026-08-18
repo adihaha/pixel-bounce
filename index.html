@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<title>像素弹球 · Pixel Breakout</title>
+<style>
+  :root{
+    --bg:#0f0e17; --panel:#1a1930; --ink:#fffffe; --dim:#a7a9be;
+    --accent:#ff8906; --neon:#7f5af0; --green:#2cb67d;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;overflow:hidden;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Courier New',monospace;
+    display:flex;flex-direction:column;align-items:center;
+    user-select:none;-webkit-user-select:none;touch-action:none;
+  }
+  .hud{
+    width:min(560px,100vw);display:flex;justify-content:space-between;align-items:center;
+    padding:12px 16px 6px;font-size:14px;letter-spacing:1px;
+  }
+  .hud b{color:var(--accent);}
+  .hud .score{font-size:16px;}
+  .hud .lives{color:var(--neon);}
+  .stage{
+    position:relative;
+    width:min(560px,100vw);
+    aspect-ratio:14/20;
+    background:var(--panel);
+    border:2px solid #2a2840;
+    border-radius:8px;
+    overflow:hidden;
+    box-shadow:0 0 24px rgba(127,90,240,.15), inset 0 0 40px rgba(0,0,0,.4);
+  }
+  canvas{
+    display:block;width:100%;height:100%;
+    image-rendering:pixelated;image-rendering:crisp-edges;
+    background:#14132a;
+  }
+  .overlay{
+    position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:14px;
+    background:rgba(15,14,23,.82);backdrop-filter:blur(3px);
+    text-align:center;z-index:5;
+  }
+  .overlay.hidden{display:none;}
+  .overlay h1{
+    font-size:34px;letter-spacing:2px;color:var(--accent);
+    text-shadow:0 0 18px rgba(255,137,6,.6);
+  }
+  .overlay h1 .px{color:var(--neon);}
+  .overlay p{color:var(--dim);font-size:13px;line-height:1.8;padding:0 24px;}
+  .overlay .tip{color:var(--green);font-size:12px;}
+  .btn{
+    margin-top:6px;padding:12px 34px;font-size:17px;font-family:inherit;letter-spacing:2px;
+    background:var(--accent);color:#0f0e17;border:none;border-radius:6px;
+    cursor:pointer;font-weight:700;
+    box-shadow:0 0 0 2px #0f0e17,0 0 0 4px var(--accent);
+  }
+  .btn:active{transform:translateY(2px);}
+  .btn.ghost{background:transparent;color:var(--ink);box-shadow:0 0 0 2px #2a2840;}
+  .controls{width:min(560px,100vw);display:flex;gap:8px;padding:8px 12px 10px;justify-content:center;}
+  .pad-btn{
+    flex:1;max-width:160px;padding:10px 0;font-size:18px;font-family:inherit;
+    background:#1a1930;color:var(--ink);border:2px solid #2a2840;border-radius:8px;
+    cursor:pointer;touch-action:none;
+  }
+  .pad-btn:active{background:#2a2840;}
+  .pad-btn.hide-desk{display:none;}
+  @media (pointer:coarse){ .pad-btn{display:block;} }
+  .mute{position:absolute;top:8px;right:10px;background:none;border:none;color:var(--dim);font-size:16px;cursor:pointer;z-index:6;}
+</style>
+</head>
+<body>
+  <div class="hud">
+    <span class="score">SCORE <b id="score">0</b></span>
+    <span>LEVEL <b id="level">1</b></span>
+    <span class="lives" id="lives">♥♥♥</span>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="game" width="280" height="400"></canvas>
+    <button class="mute" id="muteBtn" title="声音">🔊</button>
+    <div class="overlay" id="startOverlay">
+      <h1><span class="px">PX</span> 弹球</h1>
+      <p>像素打砖块 · 挡板接住小球<br>打光全部砖块过关<br>小球落地扣一条命</p>
+      <p class="tip">🖱 鼠标 / 👆 拖拽 / ◀ ▶ 键盘</p>
+      <button class="btn" id="startBtn">开始 ▶</button>
+    </div>
+    <div class="overlay hidden" id="winOverlay">
+      <h1>🎉 通关！</h1>
+      <p>最终得分 <b id="finalScore" style="color:var(--accent)">0</b></p>
+      <button class="btn" id="againBtn">再来一局</button>
+    </div>
+    <div class="overlay hidden" id="overOverlay">
+      <h1 style="color:var(--neon)">游戏结束</h1>
+      <p>得分 <b id="overScore" style="color:var(--accent)">0</b></p>
+      <button class="btn" id="retryBtn">重新开始</button>
+    </div>
+  </div>
+  <div class="controls">
+    <button class="pad-btn hide-desk" id="leftBtn">◀</button>
+    <button class="pad-btn hide-desk" id="rightBtn">▶</button>
+  </div>
+
+<script>
+(() => {
+  'use strict';
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const stage = document.getElementById('stage');
+
+  const SOUNDS = {
+    beep: (f=660,d=.06,v=.06) => { try{ const a=new (window.AudioContext||window.webkitAudioContext)(); const o=a.createOscillator(),g=a.createGain(); o.type='square';o.frequency.value=f;o.connect(g);g.connect(a.destination);g.gain.value=v;o.start();o.stop(a.currentTime+d); g.gain.exponentialRampToValueAtTime(.0001,a.currentTime+d); }catch(e){} }
+  };
+  let muted = false;
+  const muteBtn = document.getElementById('muteBtn');
+  muteBtn.onclick = () => { muted=!muted; muteBtn.textContent = muted?'🔇':'🔊'; };
+
+  // ---- 像素字体绘制 ----
+  const PX_FONT = '"Courier New",monospace';
+  function pxText(t,x,y,size,color,align='center'){
+    ctx.font = `${size}px ${PX_FONT}`;
+    ctx.textAlign = align; ctx.textBaseline='middle';
+    ctx.fillStyle = color;
+    ctx.fillText(t,x,y);
+  }
+
+  // ---- 游戏状态 ----
+  const COLS = 8, ROWS = 5;
+  const BRICK_W = (W-40)/COLS, BRICK_H = 14, BRICK_TOP = 34, BRICK_GAP = 4;
+  const BRICK_COLORS = ['#ff8906','#ffb703','#7f5af0','#2cb67d','#e53170'];
+  let bricks = [], score=0, lives=3, level=1;
+  let ball, paddle, running=false, over=false;
+  let lastT = 0, animId = null;
+
+  function brickPoints(row){ return (ROWS-row)*10; }
+
+  function buildLevel(){
+    bricks = [];
+    for(let r=0;r<ROWS;r++){
+      for(let c=0;c<COLS;c++){
+        bricks.push({x:20+c*(BRICK_W+BRICK_GAP), y:BRICK_TOP+r*(BRICK_H+BRICK_GAP), w:BRICK_W, h:BRICK_H, alive:true, row:r});
+      }
+    }
+  }
+
+  function resetBall(){
+    ball = { x:W/2, y:H-60, vx:(Math.random()<.5?-1:1)*(1.6+level*.15), vy:-(3.0+level*.12), r:4 };
+  }
+  function resetPaddle(){
+    paddle = { x:(W-56)/2, y:H-22, w:56, h:7 };
+  }
+  function startGame(){
+    score=0; lives=3; level=1;
+    buildLevel(); resetPaddle(); resetBall();
+    running=true; over=false;
+    updateHud();
+    hide('winOverlay');hide('overOverlay');
+    lastT = performance.now();
+    if(animId) cancelAnimationFrame(animId);
+    animId = requestAnimationFrame(loop);
+  }
+
+  function updateHud(){
+    document.getElementById('score').textContent = score;
+    document.getElementById('level').textContent = level;
+    document.getElementById('lives').textContent = '♥'.repeat(Math.max(0,lives)) + '♡'.repeat(Math.max(0,3-lives));
+  }
+
+  // ---- 输入 ----
+  let keys = {};
+  let touchActive=false, touchX=0;
+  document.addEventListener('keydown',e=>{ keys[e.key.toLowerCase()]=true; if(['arrowleft','arrowright',' '].includes(e.key.toLowerCase())) e.preventDefault(); });
+  document.addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
+
+  function movePaddleBy(dx){ paddle.x = Math.max(2, Math.min(W-2-paddle.w, paddle.x+dx)); }
+
+  // 拖拽控制（stage 内任意位置水平拖动）
+  stage.addEventListener('pointerdown',e=>{ touchActive=true; touchX=e.clientX; });
+  window.addEventListener('pointermove',e=>{
+    if(touchActive){
+      const dx = (e.clientX - touchX) * (W / stage.clientWidth);
+      movePaddleBy(dx); touchX = e.clientX;
+    }
+  });
+  window.addEventListener('pointerup',()=>{ touchActive=false; });
+
+  const leftBtn=document.getElementById('leftBtn'), rightBtn=document.getElementById('rightBtn');
+  let padL=false, padR=false;
+  leftBtn.addEventListener('pointerdown',e=>{e.preventDefault();padL=true;});
+  leftBtn.addEventListener('pointerup',()=>padL=false);
+  leftBtn.addEventListener('pointerleave',()=>padL=false);
+  rightBtn.addEventListener('pointerdown',e=>{e.preventDefault();padR=true;});
+  rightBtn.addEventListener('pointerup',()=>padR=false);
+  rightBtn.addEventListener('pointerleave',()=>padR=false);
+
+  // ---- 主循环 ----
+  function loop(t){
+    if(!running) return;
+    const dt = Math.min(0.033, (t-lastT)/1000);
+    lastT = t;
+    update(dt);
+    draw();
+    animId = requestAnimationFrame(loop);
+  }
+
+  function update(dt){
+    // 键盘/按钮
+    const sp = 380*dt;
+    if(keys['arrowleft']||keys['a']||padL) movePaddleBy(-sp);
+    if(keys['arrowright']||keys['d']||padR) movePaddleBy(sp);
+    // 空格发射加速（可选）
+    if(keys[' ']) { ball.vy -= 0.02; }
+
+    ball.x += ball.vx; ball.y += ball.vy;
+
+    // 左右墙
+    if(ball.x < ball.r){ ball.x=ball.r; ball.vx=Math.abs(ball.vx); SOUNDS.beep(440,.04,.04); }
+    if(ball.x > W-ball.r){ ball.x=W-ball.r; ball.vx=-Math.abs(ball.vx); SOUNDS.beep(440,.04,.04); }
+    // 顶墙
+    if(ball.y < ball.r){ ball.y=ball.r; ball.vy=Math.abs(ball.vy); SOUNDS.beep(520,.04,.04); }
+    // 挡板
+    if(ball.vy>0 && ball.y+ball.r >= paddle.y && ball.y+ball.r <= paddle.y+paddle.h+4 &&
+       ball.x >= paddle.x-2 && ball.x <= paddle.x+paddle.w+2){
+      const hit = (ball.x - (paddle.x+paddle.w/2)) / (paddle.w/2);
+      ball.vy = -Math.abs(ball.vy);
+      ball.vx = hit * 3.2 + (ball.vx>0? .3 : -.3);
+      ball.y = paddle.y - ball.r;
+      SOUNDS.beep(880,.05,.05);
+    }
+    // 砖块
+    for(const b of bricks){
+      if(!b.alive) continue;
+      if(ball.x+ball.r>b.x && ball.x-ball.r<b.x+b.w && ball.y+ball.r>b.y && ball.y-ball.r<b.y+b.h){
+        b.alive=false;
+        score += brickPoints(b.row);
+        updateHud();
+        // 反射
+        const cx=b.x+b.w/2, cy=b.y+b.h/2;
+        const dx=ball.x-cx, dy=ball.y-cy;
+        if(Math.abs(dx/b.w) > Math.abs(dy/b.h)) ball.vx = dx>0? Math.abs(ball.vx) : -Math.abs(ball.vx);
+        else ball.vy = dy>0? Math.abs(ball.vy) : -Math.abs(ball.vy);
+        SOUNDS.beep(660+ (ROWS-b.row)*90, .05, .05);
+        break;
+      }
+    }
+    // 落地
+    if(ball.y > H+10){
+      lives--; updateHud();
+      if(lives<=0){
+        running=false; over=true;
+        document.getElementById('overScore').textContent = score;
+        show('overOverlay');
+      } else {
+        resetBall();
+        // 短暂停顿由下一帧自然恢复
+      }
+    }
+    // 过关检测
+    if(bricks.every(b=>!b.alive)){
+      level++;
+      updateHud();
+      buildLevel();
+      resetPaddle();
+      resetBall();
+      SOUNDS.beep(1040,.12,.07);
+      if(level>5){
+        running=false;
+        document.getElementById('finalScore').textContent = score;
+        show('winOverlay');
+      }
+    }
+  }
+
+  // ---- 绘制 ----
+  function drawBrick(b){
+    ctx.fillStyle = BRICK_COLORS[b.row % BRICK_COLORS.length];
+    ctx.fillRect(b.x+1, b.y+1, b.w-2, b.h-2);
+    // 高光
+    ctx.fillStyle = 'rgba(255,255,255,.25)';
+    ctx.fillRect(b.x+1, b.y+1, b.w-2, 3);
+    // 暗边
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    ctx.fillRect(b.x+1, b.y+b.h-3, b.w-2, 2);
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // 星空背景
+    ctx.fillStyle='#14132a'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(255,255,255,.14)';
+    for(let i=0;i<40;i++){
+      const sx=(i*67)%W, sy=(i*53)%H, sr=(i%3===0)?1:0.5;
+      ctx.fillRect(sx, sy, sr, sr);
+    }
+    // 砖块
+    for(const b of bricks) if(b.alive) drawBrick(b);
+    // 挡板（像素台阶感）
+    ctx.fillStyle = '#fffffe';
+    ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
+    ctx.fillStyle = '#ff8906';
+    ctx.fillRect(paddle.x, paddle.y, paddle.w, 2);
+    // 球（8-bit 风格：实心+高光点）
+    ctx.fillStyle = '#ff8906';
+    ctx.fillRect(ball.x-4, ball.y-4, 8, 8);
+    ctx.fillStyle = 'rgba(255,255,255,.7)';
+    ctx.fillRect(ball.x-2, ball.y-2, 3, 3);
+    // 顶部标题
+    pxText('PX BREAKOUT', W/2, 14, 9, '#7f5af0');
+  }
+
+  // ---- overlay 控制 ----
+  function $(id){ return document.getElementById(id); }
+  function show(id){ $(id).classList.remove('hidden'); }
+  function hide(id){ $(id).classList.add('hidden'); }
+
+  $('startBtn').onclick = () => { hide('startOverlay'); startGame(); };
+  $('againBtn').onclick = () => { hide('winOverlay'); startGame(); };
+  $('retryBtn').onclick = () => { hide('overOverlay'); startGame(); };
+
+  // 首帧绘制预览
+  buildLevel(); resetPaddle(); resetBall();
+  draw();
+})();
+</script>
+</body>
+</html>
